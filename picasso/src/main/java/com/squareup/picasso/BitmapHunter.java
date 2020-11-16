@@ -20,6 +20,8 @@ import android.graphics.BitmapFactory;
 import android.graphics.Matrix;
 import android.net.NetworkInfo;
 import android.os.Build;
+import android.support.media.ExifInterface;
+import android.util.Pair;
 import android.view.Gravity;
 import java.io.IOException;
 import java.io.InputStream;
@@ -35,11 +37,14 @@ import okio.Source;
 
 import static android.support.media.ExifInterface.ORIENTATION_FLIP_HORIZONTAL;
 import static android.support.media.ExifInterface.ORIENTATION_FLIP_VERTICAL;
+import static android.support.media.ExifInterface.ORIENTATION_NORMAL;
 import static android.support.media.ExifInterface.ORIENTATION_ROTATE_180;
 import static android.support.media.ExifInterface.ORIENTATION_ROTATE_270;
 import static android.support.media.ExifInterface.ORIENTATION_ROTATE_90;
 import static android.support.media.ExifInterface.ORIENTATION_TRANSPOSE;
 import static android.support.media.ExifInterface.ORIENTATION_TRANSVERSE;
+import static android.support.media.ExifInterface.ORIENTATION_UNDEFINED;
+import static android.support.media.ExifInterface.TAG_ORIENTATION;
 import static com.squareup.picasso.MemoryPolicy.shouldReadFromMemoryCache;
 import static com.squareup.picasso.Picasso.LoadedFrom.MEMORY;
 import static com.squareup.picasso.Picasso.Priority;
@@ -122,7 +127,7 @@ class BitmapHunter implements Runnable {
    * about the supplied request in order to do the decoding efficiently (such as through leveraging
    * {@code inSampleSize}).
    */
-  static Bitmap decodeStream(Source source, Request request) throws IOException {
+  static Pair<Bitmap, Integer> decodeStream(Source source, Request request) throws IOException {
     BufferedSource bufferedSource = Okio.buffer(source);
 
     boolean isWebPFile = Utils.isWebPFile(bufferedSource);
@@ -140,9 +145,10 @@ class BitmapHunter implements Runnable {
         RequestHandler.calculateInSampleSize(request.targetWidth, request.targetHeight, options,
             request);
       }
-      return BitmapFactory.decodeByteArray(bytes, 0, bytes.length, options);
+      return new Pair(BitmapFactory.decodeByteArray(bytes, 0, bytes.length, options), ORIENTATION_UNDEFINED);
     } else {
       InputStream stream = bufferedSource.inputStream();
+      int orientation;
       if (calculateSize) {
         // TODO use an InputStream that buffers with Okio...
         MarkableInputStream markStream = new MarkableInputStream(stream);
@@ -155,12 +161,23 @@ class BitmapHunter implements Runnable {
         markStream.reset(mark);
         markStream.allowMarksToExpire(true);
       }
+      {
+        // TODO use an InputStream that buffers with Okio...
+        MarkableInputStream markStream = new MarkableInputStream(stream);
+        stream = markStream;
+        markStream.allowMarksToExpire(false);
+        long mark = markStream.savePosition(1024);
+        ExifInterface exifInterface = new ExifInterface(stream);
+        orientation = exifInterface.getAttributeInt(TAG_ORIENTATION, ORIENTATION_UNDEFINED);
+        markStream.reset(mark);
+        markStream.allowMarksToExpire(true);
+      }
       Bitmap bitmap = BitmapFactory.decodeStream(stream, null, options);
       if (bitmap == null) {
         // Treat null as an IO exception, we will eventually retry.
         throw new IOException("Failed to decode stream.");
       }
-      return bitmap;
+      return new Pair(bitmap, orientation);
     }
   }
 
@@ -226,7 +243,9 @@ class BitmapHunter implements Runnable {
       if (bitmap == null) {
         Source source = result.getSource();
         try {
-          bitmap = decodeStream(source, data);
+          Pair<Bitmap, Integer> res = decodeStream(source, data);
+          bitmap = res.first;
+          exifOrientation = res.second;
         } finally {
           try {
             //noinspection ConstantConditions If bitmap is null then source is guranteed non-null.
