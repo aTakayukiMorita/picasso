@@ -166,7 +166,8 @@ class BitmapHunter implements Runnable {
         MarkableInputStream markStream = new MarkableInputStream(stream);
         stream = markStream;
         markStream.allowMarksToExpire(false);
-        long mark = markStream.savePosition(1024);
+        // use limit of ExifInterface.SIGNATURE_CHECK_SIZE
+        long mark = markStream.savePosition(5000);
         ExifInterface exifInterface = new ExifInterface(stream);
         orientation = exifInterface.getAttributeInt(TAG_ORIENTATION, ORIENTATION_UNDEFINED);
         markStream.reset(mark);
