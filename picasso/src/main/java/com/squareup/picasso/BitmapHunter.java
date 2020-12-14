@@ -246,7 +246,9 @@ class BitmapHunter implements Runnable {
         try {
           Pair<Bitmap, Integer> res = decodeStream(source, data);
           bitmap = res.first;
-          exifOrientation = res.second;
+          if (exifOrientation == ORIENTATION_UNDEFINED) {
+            exifOrientation = res.second;
+          }
         } finally {
           try {
             //noinspection ConstantConditions If bitmap is null then source is guranteed non-null.
